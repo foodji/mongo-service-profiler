@@ -14,15 +14,11 @@ Script for automated analysis of profiling data in MongoDB,
 gathered by Mongo with db.setProfilingLevel(1).
 See <http://www.mongodb.org/display/DOCS/Database+Profiler>
 https://studio3t.com/knowledge-base/articles/mongodb-query-performance/
-TODO: pass collection and database with profiling data in arguments
-TODO: make thread-safe
-TODO: handle map-reduce operations
 """
 import string
 import random
 import datetime
-from pprint import pprint
-from pymongo import MongoClient as Connection
+from   pymongo  import MongoClient as Connection
 
 DB_TEST_NAME='test'
 
@@ -37,7 +33,10 @@ class DBActor:
         )
         self._conn  = Connection(url)
         self._db    = self._conn[DB_TEST_NAME]
-        self._idmap = {}
+        self._idlist = self._db.post.distinct("_id", {})
+
+    def setProfilingLevel(self):
+        self._db.set_profiling_level(2)
 
     def write(self):
         """
@@ -49,41 +48,74 @@ class DBActor:
             "tags"  : ["mongodb", "python", "pymongo"],
             "date"  : datetime.datetime.utcnow()
         }
-        ins = self._db.test.insert_one(post).inserted_id
-        self._idmap[ins] = {'r' : 0, 'w' : 1, 'u' : 0, 'd' : 0}
+        uid = self._db.post.insert_one(post).inserted_id
+        self._idlist.append(uid)
 
     def update(self):
         """
         Creates a post with random data:w
         """
-        upid = random.choice(list(self._idmap.keys()))
+        upid = random.choice(self._idlist)
         post = {
             "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
         }
-        res = self._db.posts.update_one({"id" : upid}, { "$set": post })
-        if res.matched_count == 1 and res.modified_count == 1:
-            print("Updated a record")
-            self._idmap[upid]['u'] += 1
+        self._db.post.update_one({"_id" : upid}, { "$set": post })
 
     def read(self):
-        upid = random.choice(list(self._idmap.keys()))
-        self._db.posts.find_one({ "id" : upid })
-        self._idmap[upid]['r'] += 1
-        print("Read a record")
-
+        """
+        Read an entry
+        """
+        upid = random.choice(self._idlist)
+        self._db.post.find_one({ "id" : upid })
 
     def delete(self):
-        upid = random.choice(list(self._idmap.keys()))
-        self._db.posts.find_one({ "id" : upid })
-        self._idmap[upid]['r'] += 1
-        pass
+        """
+        Delete an entry
+        """
+        if len(self._idlist) > 0:
+            upid = random.choice(self._idlist)
+            self._db.post.delete_one({ "_id" : upid })
+            self._idlist.remove(upid)
+
+
+class CRUDRuntime:
+    """A runtime that spawns and runs actor transactions random"""
+    def __init__(self, ticks=200, host="localhost"):
+        self._readActor   = DBActor("ReadActor",   host)
+        self._writeActor  = DBActor("WriteActor",  host)
+        self._updateActor = DBActor("UpdateActor", host)
+        self._deleteActor = DBActor("DeleteActor", host)
+        self._hybridActor = DBActor("HybridActor", host)
+        self._counter = 0
+        self._ticks = ticks
+
+    def run(self):
+        """
+        RUn the simulation
+        """
+        _actions = range(0,4)
+        self._hybridActor.setProfilingLevel()
+        while self._counter < self._ticks:
+            _choice = random.choice(_actions)
+            if _choice == 0:
+                self._readActor.read()
+            elif _choice == 1:
+                self._writeActor.write()
+            elif _choice == 2:
+                self._deleteActor.delete()
+            else:
+                self._updateActor.update()
+            if random.randint(0,7) > random.randint(0,7):
+                self._hybridActor.read()
+            elif _choice%2 == 0 :
+                self._hybridActor.write()
+            self._counter = self._counter + 1
 
 
 if __name__ == '__main__':
-    import sys
-    # TODO: Build random Actors to modify the database so as to generate
-    # profiling information
-    print(len(sys.argv))
-    if len(sys.argv) > 1:
-        host = sys.argv[1]
-    get_profile_collection()
+    print("Mongostat db generator")
+    print("Running 200 actions")
+    print("=======================")
+    CRUDRuntime().run()
+    print("\tDone")
+    print("=======================")
