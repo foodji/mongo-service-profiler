@@ -45,7 +45,7 @@ class DBActor:
         post = {
             "author": ''.join(random.choices(string.ascii_letters + string.digits, k=26)),
             "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
-            "tags"  : ["mongodb", "python", "pymongo"],
+            "tags"  : [ "mongodb", "python", "pymongo" ],
             "date"  : datetime.datetime.utcnow()
         }
         uid = self._db.post.insert_one(post).inserted_id
@@ -94,6 +94,7 @@ class CRUDRuntime:
         RUn the simulation
         """
         _actions = range(0,4)
+        # Some parameters for profiling can be passed here
         self._hybridActor.setProfilingLevel()
         while self._counter < self._ticks:
             _choice = random.choice(_actions)
@@ -112,10 +113,86 @@ class CRUDRuntime:
             self._counter = self._counter + 1
 
 
+class Aggregator:
+
+    """Collects aggregate information"""
+
+    # TODO: Command data
+
+    def __init__(self, address='localhost', useSSl=False):
+        """
+        Constructor
+        """
+        url = "mongodb://{}:27017/?readPreference=primary&appname=Aggregator&ssl={}".format(
+            address, str(useSSl).lower()
+        )
+        self._conn  = Connection(url)
+        self._db    = self._conn[DB_TEST_NAME]
+
+    
+    def group_by_app(self):
+        """
+        db.getCollection("system.profile").aggregate([ 
+            { $group : {
+                _id   : { appName : '$appName', op  :'$op' },
+                    total : {  $sum : 1 }
+                }
+            },
+            { $project : {
+                    appName : '$_id.appName',
+                    op      : '$_id.op',
+                    total   : '$total' ,
+                    _id     : 0
+                }
+            },
+            { $sort : { "appName" : 1 } }
+        ]);
+        """
+        data = self._db.get_collection("system.profile").aggregate([
+            { '$group' : {
+                '_id'   : { 'appName' : '$appName', 'op'  :'$op' },
+                    'total' : {  '$sum' : 1 }
+                }
+            },
+            { '$project' : {
+                    'appName' : '$_id.appName',
+                    'op'      : '$_id.op',
+                    'total'   : '$total' ,
+                    '_id'     : 0
+                }
+            },
+            { '$sort' : { "appName" : 1 } }
+        ])
+        print(list(data))
+
+    def group_by_op(self):
+        """
+        db.getCollection("system.profile").aggregate([ 
+            { $group   : { 
+                _id : "$op", 
+                apps: { $addToSet : "$appName" }, 
+                total: { $sum : 1 }
+                } 
+            },
+        ])
+        """
+        data = self._db.get_collection("system.profile").aggregate([ 
+            { '$group'   : { 
+                '_id'   : "$op", 
+                'apps'  : { '$addToSet' : "$appName" },
+                'total' : { '$sum'      :  1 }
+                } 
+            },
+        ])
+        print(list(data))
+
+
 if __name__ == '__main__':
     print("Mongostat db generator")
-    print("Running 200 actions")
-    print("=======================")
-    CRUDRuntime().run()
-    print("\tDone")
-    print("=======================")
+    # print("Running 200 actions")
+    # print("=======================")
+    # CRUDRuntime().run()
+    # print("\tDone")
+    # print("=======================")
+    Aggregator().group_by_app()
+    Aggregator().group_by_op()
