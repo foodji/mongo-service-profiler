@@ -18,9 +18,35 @@ https://studio3t.com/knowledge-base/articles/mongodb-query-performance/
 import string
 import random
 import datetime
+from pprint import pprint
 from   pymongo  import MongoClient as Connection
+from bson.code import Code
 
 DB_TEST_NAME='test'
+
+
+class MapCodes:
+
+    # TODO: External files can be used to store these functions and loaded on 
+    # demand
+
+    @staticmethod
+    def map_command():
+        """
+        TODO: Docstring for map_command.
+        :returns: TODO
+        """
+        # return Code("function(){ emit(this.appName, this.command) }")
+        return Code("function(){emit(this.appName, this.command);}")
+
+    @staticmethod
+    def reduce_command():
+        """
+        TODO: Docstring for map_command.
+        :returns: TODO
+        """
+        # return Code("function(key, values){ return JSON.stringify(values) }")
+        return Code("function(k,v){return v;}")
 
 class DBActor:
     """A Database actor will perform a set of operations against a connection"""
@@ -163,7 +189,7 @@ class Aggregator:
             },
             { '$sort' : { "appName" : 1 } }
         ])
-        print(list(data))
+        pprint(list(data))
 
     def group_by_op(self):
         """
@@ -184,8 +210,31 @@ class Aggregator:
                 } 
             },
         ])
-        print(list(data))
+        pprint(list(data))
 
+    def group_by_command(self):
+        """
+        db.system.profile.mapReduce(
+            function()
+            {
+                emit( this.appName, this.command  );
+            },
+            function( key, values ) 
+            {
+                return JSON.stringify(values);
+            },
+            {
+                query: {},
+                out  : "command_maps"
+            }
+        )
+        """
+        data = self._db.get_collection("system.profile").map_reduce(
+            MapCodes.map_command(),
+            MapCodes.reduce_command(),
+            "appname_commands"  ## TODO: Make optional not hardcoded
+        )
+        pprint(list(data.find({})))
 
 if __name__ == '__main__':
     print("Mongostat db generator")
@@ -193,6 +242,10 @@ if __name__ == '__main__':
     # print("=======================")
     # CRUDRuntime().run()
     # print("\tDone")
-    # print("=======================")
+    print("=======================")
+    print("Grouping by App")
     Aggregator().group_by_app()
+    print("Grouping by Operation")
     Aggregator().group_by_op()
+    print("Grouping by Command")
+    Aggregator().group_by_command()
