@@ -21,8 +21,11 @@ import datetime
 from pprint import pprint
 from   pymongo  import MongoClient as Connection
 from bson.code import Code
+import argparse
 
 DB_TEST_NAME='test'
+
+CHOICES=["app", "op", "command"]
 
 
 class MapCodes:
@@ -221,7 +224,7 @@ class Aggregator:
             },
             function( key, values ) 
             {
-                return JSON.stringify(values);
+                return values;
             },
             {
                 query: {},
@@ -237,15 +240,30 @@ class Aggregator:
         pprint(list(data.find({})))
 
 if __name__ == '__main__':
-    print("Mongostat db generator")
-    # print("Running 200 actions")
-    # print("=======================")
-    # CRUDRuntime().run()
-    # print("\tDone")
-    print("=======================")
-    print("Grouping by App")
-    Aggregator().group_by_app()
-    print("Grouping by Operation")
-    Aggregator().group_by_op()
-    print("Grouping by Command")
-    Aggregator().group_by_command()
+    parser = argparse.ArgumentParser(description='Mongostat - Collect MongoDB statistics')
+    # parser.add_argument("echo", help="echo the string you use here")
+    parser.add_argument("--gen", help="Generate [GEN] Test database entries",
+            type=int) # hidden variable set to true, no extra args required
+    parser.add_argument("--agg", help="Aggregate output", choices=CHOICES)
+    args = parser.parse_args()
+    if args.gen and args.gen > 0:
+        print("Generating {} Entries into ` {} ` Database".format(args.gen,
+            DB_TEST_NAME))
+        print("=======================")
+        CRUDRuntime().run()
+        print("=======================")
+    else:
+        if args.gen:
+            print("Expected positive number of entries for Test Data generation")
+
+    if args.agg:
+        agg = Aggregator()
+        print("Running {} aggregation".format(args.agg))
+        print("=======================")
+        if args.agg == "op":
+            agg.group_by_op()
+        elif args.agg=="app":
+            agg.group_by_app()
+        else:
+            agg.group_by_command()
+        print("=======================")
