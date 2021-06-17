@@ -18,9 +18,10 @@ https://studio3t.com/knowledge-base/articles/mongodb-query-performance/
 import string
 import random
 import datetime
-from pprint import pprint
-from   pymongo  import MongoClient as Connection
-from bson.code import Code
+from   pprint    import pprint
+from   pymongo   import MongoClient as Connection
+from   bson.code import Code
+from   bson.son  import SON
 import argparse
 
 DB_TEST_NAME='test'
@@ -39,8 +40,25 @@ class MapCodes:
         TODO: Docstring for map_command.
         :returns: TODO
         """
-        # return Code("function(){ emit(this.appName, this.command) }")
-        return Code("function(){emit(this.appName, this.command);}")
+        # return Code("""function(){ 
+                # emit(this.appName, this.command) 
+        # }""")
+        return Code("""function(){
+                let commcopy = Object.assign({}, this.command);
+                if(commcopy["q"] != undefined)
+                {
+                    commcopy["q"]["_id"] = commcopy["q"]["_id"].valueOf();                
+                }
+                if(commcopy["filter"] != undefined )
+                {
+                    commcopy["filter"]["id"] = commcopy["filter"]["id"].valueOf();                
+                }
+                if(commcopy["lsid"] != undefined)
+                {
+                    commcopy["lsid"]["id"] = commcopy["lsid"]["id"].toString().split('"')[1];                
+                }
+                emit( this.appName, commcopy  );
+        }""")
 
     @staticmethod
     def reduce_command():
@@ -51,6 +69,11 @@ class MapCodes:
         # return Code("function(key, values){ return JSON.stringify(values) }")
         return Code("function(k,v){return v;}")
 
+    @staticmethod
+    def finalize_command():
+        return Code("function(key,red){return red;}")
+
+
 class DBActor:
     """A Database actor will perform a set of operations against a connection"""
 
@@ -58,8 +81,8 @@ class DBActor:
         """
         """
         url = "mongodb://{}:27017/?readPreference=primary&appname={}&ssl={}".format(
-            address, name, str(useSSl).lower()
-        )
+                address, name, str(useSSl).lower()
+                )
         self._conn  = Connection(url)
         self._db    = self._conn[DB_TEST_NAME]
         self._idlist = self._db.post.distinct("_id", {})
@@ -72,11 +95,11 @@ class DBActor:
         Creates a post with random data:w
         """
         post = {
-            "author": ''.join(random.choices(string.ascii_letters + string.digits, k=26)),
-            "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
-            "tags"  : [ "mongodb", "python", "pymongo" ],
-            "date"  : datetime.datetime.utcnow()
-        }
+                "author": ''.join(random.choices(string.ascii_letters + string.digits, k=26)),
+                "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
+                "tags"  : [ "mongodb", "python", "pymongo" ],
+                "date"  : datetime.datetime.utcnow()
+                }
         uid = self._db.post.insert_one(post).inserted_id
         self._idlist.append(uid)
 
@@ -86,8 +109,8 @@ class DBActor:
         """
         upid = random.choice(self._idlist)
         post = {
-            "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
-        }
+                "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
+                }
         self._db.post.update_one({"_id" : upid}, { "$set": post })
 
     def read(self):
@@ -153,12 +176,12 @@ class Aggregator:
         Constructor
         """
         url = "mongodb://{}:27017/?readPreference=primary&appname=Aggregator&ssl={}".format(
-            address, str(useSSl).lower()
-        )
+                address, str(useSSl).lower()
+                )
         self._conn  = Connection(url)
         self._db    = self._conn[DB_TEST_NAME]
 
-    
+
     def group_by_app(self):
         """
         db.getCollection("system.profile").aggregate([ 
@@ -180,18 +203,18 @@ class Aggregator:
         data = self._db.get_collection("system.profile").aggregate([
             { '$group' : {
                 '_id'   : { 'appName' : '$appName', 'op'  :'$op' },
-                    'total' : {  '$sum' : 1 }
+                'total' : {  '$sum' : 1 }
                 }
-            },
+                },
             { '$project' : {
-                    'appName' : '$_id.appName',
-                    'op'      : '$_id.op',
-                    'total'   : '$total' ,
-                    '_id'     : 0
+                'appName' : '$_id.appName',
+                'op'      : '$_id.op',
+                'total'   : '$total' ,
+                '_id'     : 0
                 }
-            },
+                },
             { '$sort' : { "appName" : 1 } }
-        ])
+            ])
         pprint(list(data))
 
     def group_by_op(self):
@@ -211,8 +234,8 @@ class Aggregator:
                 'apps'  : { '$addToSet' : "$appName" },
                 'total' : { '$sum'      :  1 }
                 } 
-            },
-        ])
+                },
+            ])
         pprint(list(data))
 
     def group_by_command(self):
@@ -233,11 +256,13 @@ class Aggregator:
         )
         """
         data = self._db.get_collection("system.profile").map_reduce(
-            MapCodes.map_command(),
-            MapCodes.reduce_command(),
-            "appname_commands"  ## TODO: Make optional not hardcoded
-        )
-        pprint(list(data.find({})))
+                MapCodes.map_command(),
+                MapCodes.reduce_command(),
+                # "appname_commands",  ## TODO: Make optional not hardcoded
+                out=SON([('inline',1)]),
+                finalize=MapCodes.finalize_command()
+                )
+        pprint(data)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Mongostat - Collect MongoDB statistics')
