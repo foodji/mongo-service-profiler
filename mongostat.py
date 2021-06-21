@@ -43,7 +43,8 @@ class MapCodes:
         # return Code("""function(){ 
                 # emit(this.appName, this.command) 
         # }""")
-        return Code("""function(){
+        return Code("""
+            function(){
                 let commcopy = Object.assign({}, this.command);
                 if(commcopy["q"] != undefined)
                 {
@@ -77,14 +78,14 @@ class MapCodes:
 class DBActor:
     """A Database actor will perform a set of operations against a connection"""
 
-    def __init__(self, name, address, useSSl=False):
+    def __init__(self, name, address, table='test', port=27017, useSSl=False):
         """
         """
-        url = "mongodb://{}:27017/?readPreference=primary&appname={}&ssl={}".format(
-                address, name, str(useSSl).lower()
+        url = "mongodb://{}:{}/?readPreference=primary&appname={}&ssl={}".format(
+                address, port, name, str(useSSl).lower()
                 )
         self._conn  = Connection(url)
-        self._db    = self._conn[DB_TEST_NAME]
+        self._db    = self._conn[table]
         self._idlist = self._db.post.distinct("_id", {})
 
     def setProfilingLevel(self):
@@ -99,7 +100,7 @@ class DBActor:
                 "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
                 "tags"  : [ "mongodb", "python", "pymongo" ],
                 "date"  : datetime.datetime.utcnow()
-                }
+            }
         uid = self._db.post.insert_one(post).inserted_id
         self._idlist.append(uid)
 
@@ -107,18 +108,20 @@ class DBActor:
         """
         Creates a post with random data:w
         """
-        upid = random.choice(self._idlist)
-        post = {
-                "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
+        if len(self._idlist) > 0:
+            upid = random.choice(self._idlist)
+            post = {
+                    "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
                 }
-        self._db.post.update_one({"_id" : upid}, { "$set": post })
+            self._db.post.update_one({"_id" : upid}, { "$set": post })
 
     def read(self):
         """
         Read an entry
         """
-        upid = random.choice(self._idlist)
-        self._db.post.find_one({ "id" : upid })
+        if len(self._idlist) > 0:
+            upid = random.choice(self._idlist)
+            self._db.post.find_one({ "id" : upid })
 
     def delete(self):
         """
@@ -131,13 +134,15 @@ class DBActor:
 
 
 class CRUDRuntime:
-    """A runtime that spawns and runs actor transactions random"""
-    def __init__(self, ticks=200, host="localhost"):
-        self._readActor   = DBActor("ReadActor",   host)
-        self._writeActor  = DBActor("WriteActor",  host)
-        self._updateActor = DBActor("UpdateActor", host)
-        self._deleteActor = DBActor("DeleteActor", host)
-        self._hybridActor = DBActor("HybridActor", host)
+    """A runtime that spawns and runs actor transactions randomly
+       Use to generate test entries!
+    """
+    def __init__(self, ticks=200, host="localhost", table='test', port=27017, ssl=False):
+        self._readActor   = DBActor("ReadActor",   host, table=table, port=port, useSSl=ssl)
+        self._writeActor  = DBActor("WriteActor",  host, table=table, port=port, useSSl=ssl)
+        self._updateActor = DBActor("UpdateActor", host, table=table, port=port, useSSl=ssl )
+        self._deleteActor = DBActor("DeleteActor", host, table=table, port=port, useSSl=ssl )
+        self._hybridActor = DBActor("HybridActor", host, table=table, port=port, useSSl=ssl )
         self._counter = 0
         self._ticks = ticks
 
@@ -163,23 +168,22 @@ class CRUDRuntime:
             elif _choice%2 == 0 :
                 self._hybridActor.write()
             self._counter = self._counter + 1
+        print("Done")
 
 
 class Aggregator:
 
     """Collects aggregate information"""
 
-    # TODO: Command data
-
-    def __init__(self, address='localhost', useSSl=False):
+    def __init__(self, address='localhost',port='27017', db='test', useSSl=False):
         """
         Constructor
         """
-        url = "mongodb://{}:27017/?readPreference=primary&appname=Aggregator&ssl={}".format(
-                address, str(useSSl).lower()
+        url = "mongodb://{}:{}/?readPreference=primary&appname=Mongostat&ssl={}".format(
+                address, port, str(useSSl).lower()
                 )
         self._conn  = Connection(url)
-        self._db    = self._conn[DB_TEST_NAME]
+        self._db    = self._conn[db]
 
 
     def group_by_app(self):
@@ -251,8 +255,9 @@ class Aggregator:
             },
             {
                 query: {},
-                out  : "command_maps"
-            }
+                out  :  { inline:1 },
+                finalize: ...
+            },
         )
         """
         data = self._db.get_collection("system.profile").map_reduce(
@@ -267,28 +272,41 @@ class Aggregator:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Mongostat - Collect MongoDB statistics')
     # parser.add_argument("echo", help="echo the string you use here")
-    parser.add_argument("--gen", help="Generate [GEN] Test database entries",
-            type=int) # hidden variable set to true, no extra args required
-    parser.add_argument("--agg", help="Aggregate output", choices=CHOICES)
+    parser.add_argument("--gen",     help="Generate [GEN] entries",             type=int) 
+    parser.add_argument("--agg",     help="Aggregation",   choices=CHOICES)
+    parser.add_argument("--host",    help="Host address",  default="127.0.0.1", type=str)
+    parser.add_argument("--port",    help="Host port",     default=27017,       type=int)
+    parser.add_argument("--use-ssl", help="Enable SSL",    default=False,       type=bool)
+    parser.add_argument("--db",      help="Database name", default="test",      type=str)
     args = parser.parse_args()
+
+    print("=========================================")
+    print("## Host : {} ".format(args.host))
+    print("## Port : {} ".format(args.port))
+    print("## SSL  : {} ".format(args.use_ssl))
+    print("## DB   : {} ".format(args.db))
+    print("=========================================")
+
+
     if args.gen and args.gen > 0:
-        print("Generating {} Entries into ` {} ` Database".format(args.gen,
-            DB_TEST_NAME))
-        print("=======================")
-        CRUDRuntime().run()
-        print("=======================")
+        print("=========================================")
+        print("Generating {} Entries into `{}` Database".format(args.gen, args.db))
+        print("=========================================")
+        CRUDRuntime(ticks=args.gen, host=args.host, table=args.db, port=args.port, ssl=args.use_ssl).run()
+        print("=========================================")
     else:
         if args.gen:
             print("Expected positive number of entries for Test Data generation")
 
     if args.agg:
-        agg = Aggregator()
+        agg = Aggregator(address=args.host, useSSl=args.use_ssl, port=args.port, db=args.db)
+        print("=========================================")
         print("Running {} aggregation".format(args.agg))
-        print("=======================")
+        print("=========================================")
         if args.agg == "op":
             agg.group_by_op()
-        elif args.agg=="app":
+        elif args.agg =="app":
             agg.group_by_app()
         else:
             agg.group_by_command()
-        print("=======================")
+        print("=========================================")
