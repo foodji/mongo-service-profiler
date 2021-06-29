@@ -35,31 +35,44 @@ class MapCodes:
     # demand
 
     @staticmethod
+    def globals():
+        """
+        Global variables and functions
+        """
+        return Code("""
+                function(obj, astage, bstage, tov)
+                {
+                    if(obj[astage] !== undefined)
+                    {
+                        if(obj[astage][bstage] !== undefined)
+                        {
+                            if(tov)
+                            {
+                               obj[astage][bstage] = obj[astage][bstage].valueOf();
+                            } else
+                            {
+                               obj[astage][bstage] = obj[astage][bstage].valueOf().toString().split('"')[1];
+                            }
+                        }
+                    }
+                }
+        """)
+
+    @staticmethod
     def map_command():
         """
         TODO: Docstring for map_command.
         :returns: TODO
         """
-        # return Code("""function(){ 
-                # emit(this.appName, this.command) 
-        # }""")
         return Code("""
             function(){
+                // TODO: Use globals to avoid redefinition each instance
                 let commcopy = Object.assign({}, this.command);
-                if(commcopy["q"] != undefined)
-                {
-                    commcopy["q"]["_id"] = commcopy["q"]["_id"].valueOf();                
-                }
-                if(commcopy["filter"] != undefined )
-                {
-                    commcopy["filter"]["id"] = commcopy["filter"]["id"].valueOf();                
-                }
-                if(commcopy["lsid"] != undefined)
-                {
-                    commcopy["lsid"]["id"] = commcopy["lsid"]["id"].toString().split('"')[1];                
-                }
+                scrubber(commcopy, "q", "_id", true);
+                scrubber(commcopy, "filter", "id", true);
+                scrubber(commcopy, "lsid", "id", false);
                 emit( this.appName, commcopy  );
-        }""")
+            }""")
 
     @staticmethod
     def reduce_command():
@@ -100,7 +113,7 @@ class DBActor:
                 "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
                 "tags"  : [ "mongodb", "python", "pymongo" ],
                 "date"  : datetime.datetime.utcnow()
-            }
+                }
         uid = self._db.post.insert_one(post).inserted_id
         self._idlist.append(uid)
 
@@ -112,7 +125,7 @@ class DBActor:
             upid = random.choice(self._idlist)
             post = {
                     "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
-                }
+                    }
             self._db.post.update_one({"_id" : upid}, { "$set": post })
 
     def read(self):
@@ -260,11 +273,12 @@ class Aggregator:
             },
         )
         """
-        data = self._db.get_collection("system.profile").map_reduce(
+        data = self._db.get_collection("system.profile").inline_map_reduce(
                 MapCodes.map_command(),
                 MapCodes.reduce_command(),
                 # "appname_commands",  ## TODO: Make optional not hardcoded
-                out=SON([('inline',1)]),
+                # out=SON([('inline', 1)]),
+                scope={ "scrubber" : MapCodes.globals() },
                 finalize=MapCodes.finalize_command()
                 )
         pprint(data)
