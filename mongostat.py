@@ -21,7 +21,7 @@ import datetime
 from   pprint    import pprint
 from   pymongo   import MongoClient as Connection
 from   bson.code import Code
-from   bson.son  import SON
+# from   bson.son  import SON
 import argparse
 
 DB_TEST_NAME='test'
@@ -31,13 +31,13 @@ CHOICES=["app", "op", "command"]
 
 class MapCodes:
 
-    # TODO: External files can be used to store these functions and loaded on 
-    # demand
-
     @staticmethod
-    def globals():
+    def scrubber():
         """
         Global variables and functions
+        This method converts some specific problematic BSON objects into plain
+        strings so that the JSON.stringify and JSON.parse work as intended. It
+        should probably be broken up to be more granular
         """
         return Code("""
                 function(obj, astage, bstage, tov)
@@ -59,33 +59,76 @@ class MapCodes:
         """)
 
     @staticmethod
+    def stripcontext():
+        """
+        Strip unnedded context in the command info
+        Converts some command specific context into constant values that will be
+        filtered out
+
+        NB: Only the filter key is targeted since thats where the 'query'
+        context lives. Other keys such as limit, singleBatch or cursors arent 
+        targeted and may affect the output
+        """
+        return Code("""
+            function(command)
+            {
+                if(command["filter"])
+                {
+                    Object.keys(command["filter"]).map((key) => { 
+                        command["filter"][key] = true;
+                    })
+                    command["lsid"]["id"] = true;
+                }
+            }
+        """)
+
+    @staticmethod
     def map_command():
         """
-        TODO: Docstring for map_command.
-        :returns: TODO
+        Map stage of the MapReduce, does some scrubbing and stripping
         """
         return Code("""
             function(){
-                // TODO: Use globals to avoid redefinition each instance
                 let commcopy = Object.assign({}, this.command);
                 scrubber(commcopy, "q", "_id", true);
                 scrubber(commcopy, "filter", "id", true);
                 scrubber(commcopy, "lsid", "id", false);
+                stripcontext(commcopy);
                 emit( this.appName, commcopy  );
             }""")
 
     @staticmethod
     def reduce_command():
         """
-        TODO: Docstring for map_command.
-        :returns: TODO
+        Reduce stage of the MapReduce. Stringifies the value into a Set, to
+        retain unique entries
         """
         # return Code("function(key, values){ return JSON.stringify(values) }")
-        return Code("function(k,v){return v;}")
+        return Code("""
+            function(k,v){
+                let itemset = new Set();
+                v.forEach(function(val){
+                    itemset.add(JSON.stringify(val));
+                });
+                return Array.from(itemset);
+            }
+        """)
 
     @staticmethod
     def finalize_command():
-        return Code("function(key,red){return red;}")
+        """
+        Finalize stage after the mapreduce to reconvert back the stringified
+        objects
+        """
+        return Code("""
+            function(key,red)
+            {
+                let itemset = new Set();
+                red.forEach(function(val){
+                    itemset.add(JSON.parse(val));
+                })
+                return Array.from(itemset);
+            }""")
 
 
 class DBActor:
@@ -106,7 +149,7 @@ class DBActor:
 
     def write(self):
         """
-        Creates a post with random data:w
+        Creates a post with random data
         """
         post = {
                 "author": ''.join(random.choices(string.ascii_letters + string.digits, k=26)),
@@ -119,7 +162,7 @@ class DBActor:
 
     def update(self):
         """
-        Creates a post with random data:w
+        Creates a post with random data
         """
         if len(self._idlist) > 0:
             upid = random.choice(self._idlist)
@@ -278,7 +321,9 @@ class Aggregator:
                 MapCodes.reduce_command(),
                 # "appname_commands",  ## TODO: Make optional not hardcoded
                 # out=SON([('inline', 1)]),
-                scope={ "scrubber" : MapCodes.globals() },
+                scope={
+                    "scrubber" : MapCodes.scrubber(), 
+                    "stripcontext": MapCodes.stripcontext() },
                 finalize=MapCodes.finalize_command()
                 )
         pprint(data)
