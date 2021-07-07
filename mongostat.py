@@ -134,12 +134,10 @@ class MapCodes:
 class DBActor:
     """A Database actor will perform a set of operations against a connection"""
 
-    def __init__(self, name, address, table='test', port=27017, useSSl=False):
+    def __init__(self, name, url, table='test'):
         """
         """
-        url = "mongodb://{}:{}/?readPreference=primary&appname={}&ssl={}".format(
-                address, port, name, str(useSSl).lower()
-                )
+        url += ("&" if "?" in url else "?") + "appname={}".format(name)
         self._conn  = Connection(url)
         self._db    = self._conn[table]
         self._idlist = self._db.post.distinct("_id", {})
@@ -193,12 +191,12 @@ class CRUDRuntime:
     """A runtime that spawns and runs actor transactions randomly
        Use to generate test entries!
     """
-    def __init__(self, ticks=200, host="localhost", table='test', port=27017, ssl=False):
-        self._readActor   = DBActor("ReadActor",   host, table=table, port=port, useSSl=ssl)
-        self._writeActor  = DBActor("WriteActor",  host, table=table, port=port, useSSl=ssl)
-        self._updateActor = DBActor("UpdateActor", host, table=table, port=port, useSSl=ssl )
-        self._deleteActor = DBActor("DeleteActor", host, table=table, port=port, useSSl=ssl )
-        self._hybridActor = DBActor("HybridActor", host, table=table, port=port, useSSl=ssl )
+    def __init__(self, ticks=200, url='mongodb://127.0.0.1:27017', table='test'):
+        self._readActor   = DBActor("ReadActor",   url, table=table)
+        self._writeActor  = DBActor("WriteActor",  url, table=table)
+        self._updateActor = DBActor("UpdateActor", url, table=table)
+        self._deleteActor = DBActor("DeleteActor", url, table=table)
+        self._hybridActor = DBActor("HybridActor", url, table=table)
         self._counter = 0
         self._ticks = ticks
 
@@ -231,13 +229,10 @@ class Aggregator:
 
     """Collects aggregate information"""
 
-    def __init__(self, address='localhost',port='27017', db='test', useSSl=False):
+    def __init__(self, url='mongo://127.0.0.1:27017', db='test'):
         """
         Constructor
         """
-        url = "mongodb://{}:{}/?readPreference=primary&appname=Mongostat&ssl={}".format(
-                address, port, str(useSSl).lower()
-                )
         self._conn  = Connection(url)
         self._db    = self._conn[db]
 
@@ -333,16 +328,12 @@ if __name__ == '__main__':
     # parser.add_argument("echo", help="echo the string you use here")
     parser.add_argument("--gen",     help="Generate [GEN] entries",             type=int) 
     parser.add_argument("--agg",     help="Aggregation",   choices=CHOICES)
-    parser.add_argument("--host",    help="Host address",  default="127.0.0.1", type=str)
-    parser.add_argument("--port",    help="Host port",     default=27017,       type=int)
-    parser.add_argument("--use-ssl", help="Enable SSL",    default=False,       type=bool)
     parser.add_argument("--db",      help="Database name", default="test",      type=str)
+    parser.add_argument("--url",     help="Database url", default="mongodb://127.0.0.1:27017", type=str)
     args = parser.parse_args()
 
     print("=========================================")
-    print("## Host : {} ".format(args.host))
-    print("## Port : {} ".format(args.port))
-    print("## SSL  : {} ".format(args.use_ssl))
+    print("## URL  : {} ".format(args.url))
     print("## DB   : {} ".format(args.db))
     print("=========================================")
 
@@ -351,14 +342,14 @@ if __name__ == '__main__':
         print("=========================================")
         print("Generating {} Entries into `{}` Database".format(args.gen, args.db))
         print("=========================================")
-        CRUDRuntime(ticks=args.gen, host=args.host, table=args.db, port=args.port, ssl=args.use_ssl).run()
+        CRUDRuntime(ticks=args.gen, url=args.url, table=args.db).run()
         print("=========================================")
     else:
         if args.gen:
             print("Expected positive number of entries for Test Data generation")
 
     if args.agg:
-        agg = Aggregator(address=args.host, useSSl=args.use_ssl, port=args.port, db=args.db)
+        agg = Aggregator(url=args.url, db=args.db)
         print("=========================================")
         print("Running {} aggregation".format(args.agg))
         print("=========================================")
