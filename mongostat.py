@@ -113,7 +113,7 @@ class MapCodes:
                 v.forEach(function(val){
                     itemset.add(JSON.stringify(val));
                 });
-                return Array.from(itemset);
+                return {values: Array.from(itemset)};
             }
         """)
 
@@ -127,7 +127,7 @@ class MapCodes:
             function(key,red)
             {
                 let itemset = new Set();
-                red.forEach(function(val){
+                red.values.forEach(function(val){
                     itemset.add(JSON.parse(val));
                 })
                 return Array.from(itemset);
@@ -329,6 +329,7 @@ class Aggregator:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Mongostat - Collect MongoDB statistics')
     # parser.add_argument("echo", help="echo the string you use here")
+    # TODO: Add config parameter to configure some arguments in a better way
     parser.add_argument("--gen",     help="Generate [GEN] entries",             type=int) 
     parser.add_argument("--agg",     help="Aggregation",   choices=CHOICES)
     parser.add_argument("--db",      help="Database name", default="test",      type=str)
