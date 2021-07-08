@@ -66,7 +66,7 @@ class MapCodes:
         filtered out
 
         NB: Only the filter key is targeted since thats where the 'query'
-        context lives. Other keys such as limit, singleBatch or cursors arent 
+        context lives. Other keys such as lsid ,limit, singleBatch or cursors arent 
         targeted and may affect the output
         """
         return Code("""
@@ -76,7 +76,10 @@ class MapCodes:
                 {
                     Object.keys(command["filter"]).map((key) => { 
                         command["filter"][key] = true;
-                    })
+                    });
+                }
+                if(command["lsid"])
+                {
                     command["lsid"]["id"] = true;
                 }
             }
