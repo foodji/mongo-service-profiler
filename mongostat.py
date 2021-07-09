@@ -263,7 +263,7 @@ class Aggregator:
                 '_id'   : { 'appName' : '$appName', 'op'  :'$op' },
                 'total' : {  '$sum' : 1 }
                 }
-                },
+            },
             { '$project' : {
                 'appName' : '$_id.appName',
                 'op'      : '$_id.op',
@@ -314,15 +314,17 @@ class Aggregator:
             },
         )
         """
-        data = self._db.get_collection("system.profile").inline_map_reduce(
-                MapCodes.map_command(),
-                MapCodes.reduce_command(),
-                # "appname_commands",  ## TODO: Make optional not hardcoded
+        # data = self._db.get_collection("system.profile").inline_map_reduce(
+        data = self._db.get_collection("system.profile").map_reduce(
+                map     = MapCodes.map_command(),
+                reduce  = MapCodes.reduce_command(),
+                out     = "mongostat",  ## TODO: Make optional not hardcoded
                 # out=SON([('inline', 1)]),
-                scope={
-                    "scrubber" : MapCodes.scrubber(), 
-                    "stripcontext": MapCodes.stripcontext() },
-                finalize=MapCodes.finalize_command()
+                scope   = {
+                        "scrubber" : MapCodes.scrubber(), 
+                        "stripcontext": MapCodes.stripcontext() 
+                    },
+                # finalize=MapCodes.finalize_command()
                 )
         pprint(data)
 
