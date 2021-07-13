@@ -249,6 +249,12 @@ class Aggregator:
         self._conn  = Connection(url)
         self._db    = self._conn[db]
         self._coll  = collection
+        info = self._conn.server_info()
+        dbi = self._db.profiling_level()
+        print("-----------------------------------------")
+        print("| Mongo version: {} +git {}\n| Profiling level: {} ".format(info['version'],
+            info['gitVersion'], dbi))
+        print("-----------------------------------------")
 
 
     def group_by_app(self):
