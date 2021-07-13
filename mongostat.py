@@ -19,10 +19,14 @@ import string
 import random
 import datetime
 from   pprint    import pprint
-from   pymongo   import MongoClient as Connection
+from   pymongo   import MongoClient as Connection, collection
 from   bson.code import Code
 # from   bson.son  import SON
 import argparse
+
+import pymongo
+from pymongo.common import validate
+from pymongo.database import Database
 
 DB_TEST_NAME='test'
 
@@ -30,6 +34,9 @@ CHOICES=["app", "op", "command"]
 
 
 class MapCodes:
+
+    # TODO: Different versions may be producing different output structures, we
+    # may need to load Code data based on mongo version information
 
     @staticmethod
     def scrubber():
@@ -146,7 +153,7 @@ class DBActor:
         self._idlist = self._db.post.distinct("_id", {})
 
     def setProfilingLevel(self):
-        self._db.set_profiling_level(2)
+        self._db.set_profiling_level(level=pymongo.ALL)
 
     def write(self):
         """
@@ -232,12 +239,16 @@ class Aggregator:
 
     """Collects aggregate information"""
 
-    def __init__(self, url='mongo://127.0.0.1:27017', db='test'):
+    # TODO: Tweak all options to either Write to a collection or output
+
+    def __init__(self, url='mongo://127.0.0.1:27017', db='test',
+            collection='system.profile'):
         """
         Constructor
         """
         self._conn  = Connection(url)
         self._db    = self._conn[db]
+        self._coll  = collection
 
 
     def group_by_app(self):
@@ -258,7 +269,7 @@ class Aggregator:
             { $sort : { "appName" : 1 } }
         ]);
         """
-        data = self._db.get_collection("system.profile").aggregate([
+        data = self._db.get_collection(self._coll).aggregate([
             { '$group' : {
                 '_id'   : { 'appName' : '$appName', 'op'  :'$op' },
                 'total' : {  '$sum' : 1 }
@@ -286,7 +297,7 @@ class Aggregator:
             },
         ])
         """
-        data = self._db.get_collection("system.profile").aggregate([ 
+        data = self._db.get_collection(self._coll).aggregate([ 
             { '$group'   : { 
                 '_id'   : "$op", 
                 'apps'  : { '$addToSet' : "$appName" },
@@ -314,33 +325,68 @@ class Aggregator:
             },
         )
         """
-        # data = self._db.get_collection("system.profile").inline_map_reduce(
-        data = self._db.get_collection("system.profile").map_reduce(
+        # TODO: Pass CLI option to select the collection name
+        # TODO: Optionally select whether to run inline or writeback
+        data = self._db.get_collection(self._coll).inline_map_reduce(
+        # data = self._db.get_collection("system.profile").map_reduce(
+        # data = self._db.get_collection("system_profile").map_reduce(
                 map     = MapCodes.map_command(),
                 reduce  = MapCodes.reduce_command(),
-                out     = "mongostat",  ## TODO: Make optional not hardcoded
+                # out     = "mongostat",  ## TODO: Make optional not hardcoded
                 # out=SON([('inline', 1)]),
                 scope   = {
                         "scrubber" : MapCodes.scrubber(), 
                         "stripcontext": MapCodes.stripcontext() 
                     },
-                # finalize=MapCodes.finalize_command()
+                finalize=MapCodes.finalize_command()
                 )
         pprint(data)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Mongostat - Collect MongoDB statistics')
-    # parser.add_argument("echo", help="echo the string you use here")
     # TODO: Add config parameter to configure some arguments in a better way
-    parser.add_argument("--gen",     help="Generate [GEN] entries",             type=int) 
-    parser.add_argument("--agg",     help="Aggregation",   choices=CHOICES)
-    parser.add_argument("--db",      help="Database name", default="test",      type=str)
-    parser.add_argument("--url",     help="Database url", default="mongodb://127.0.0.1:27017", type=str)
+    group   = parser.add_mutually_exclusive_group()
+    group.add_argument("--config", help="Use Config file - JSON file containing url, db and collection")
+    group.add_argument("--connect", help="Connection pair in `url db collection` format (with space) ", type=str)
+
+    # parser.add_argument("--db",  help="Database name", default="test", type=str)
+    # parser.add_argument("--url", help="Database url", default="mongodb://127.0.0.1:27017", type=str)
+
+    parser.add_argument("--gen", help="Generate [GEN] entries", type=int)
+    parser.add_argument("--agg", help="Aggregation", choices=CHOICES)
+
+
     args = parser.parse_args()
 
+    db  = 'test'
+    url = 'mongodb://127.0.0.1:27017'
+    collection ='system.profile'
+
+    if args.config:
+        import json
+        with open(args.config) as fconf:
+            jsonconf = json.load(fconf)
+            db  = jsonconf["db"]
+            url = jsonconf["url"]
+            collection = jsonconf["collection"]
+    else:
+        if args.connect:
+            connstr = args.connect.split(" ")
+            if len(connstr) == 3:
+                url = connstr[0]
+                db  = connstr[1]
+                collection = connstr[2]
+            else:
+                print("URL should be space separated string e.g \"{} {} {}\"".format(url, db, collection))
+                print("Using default connection parameters")
+        else:
+            print("Using default connection parameters")
+
+
     print("=========================================")
-    print("## URL  : {} ".format(args.url))
-    print("## DB   : {} ".format(args.db))
+    print("## URL                : {} ".format(url))
+    print("## DB                 : {} ".format(db))
+    print("## Profile collection : {} ".format(collection))
     print("=========================================")
 
 
@@ -348,14 +394,14 @@ if __name__ == '__main__':
         print("=========================================")
         print("Generating {} Entries into `{}` Database".format(args.gen, args.db))
         print("=========================================")
-        CRUDRuntime(ticks=args.gen, url=args.url, table=args.db).run()
+        CRUDRuntime(ticks=args.gen, url=url, table=db).run()
         print("=========================================")
     else:
         if args.gen:
             print("Expected positive number of entries for Test Data generation")
 
     if args.agg:
-        agg = Aggregator(url=args.url, db=args.db)
+        agg = Aggregator(url=url, db=db, collection=collection)
         print("=========================================")
         print("Running {} aggregation".format(args.agg))
         print("=========================================")
