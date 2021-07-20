@@ -16,7 +16,7 @@ import string
 import random
 import datetime
 from   pprint    import pprint
-from   pymongo   import MongoClient as Connection, collection, ALL
+from   pymongo   import MongoClient as Connection, aggregation, collection, ALL
 from   bson.code import Code
 # from   bson.son  import SON
 import argparse
@@ -140,8 +140,9 @@ class DBActor:
     def __init__(self, name, url, table='test'):
         """
         """
-        url += ("&" if "?" in url else "?") + "appname={}".format(name)
-        self._conn  = Connection(url)
+        # url += ("&" if "?" in url else "/?") + "appname={}".format(name)
+        # Pass appname parameter within connection constructor
+        self._conn  = Connection(url, appname=name)
         self._db    = self._conn[table]
         self._idlist = self._db.post.distinct("_id", {})
 
@@ -239,8 +240,8 @@ class Aggregator:
         """
         Constructor
         """
-        url += ("&" if "?" in url else "?") + "appname={}".format("Mongostat Aggregator")
-        self._conn  = Connection(url)
+        # url += ("&" if "?" in url else "?") + "appname={}".format("Mongostat Aggregator")
+        self._conn  = Connection(url, appname="Mongostat Aggregator")
         self._db    = self._conn[db]
         self._coll  = collection
         info = self._conn.server_info()
@@ -307,7 +308,37 @@ class Aggregator:
             ])
         pprint(list(data))
 
-    def group_by_command(self):
+    def group_by_command_commit(self, output):
+        """
+        db.system.profile.mapReduce(
+            function()
+            {
+                emit( this.appName, this.command  );
+            },
+            function( key, values ) 
+            {
+                return values;
+            },
+            {
+                query: {},
+                out  :  <collection name>, 
+                finalize: ...
+            },
+        )
+        """
+        self._db.get_collection(self._coll).map_reduce(
+                map     = MapCodes.map_command(),
+                reduce  = MapCodes.reduce_command(),
+                out     = output,
+                scope   = {
+                        "scrubber" : MapCodes.scrubber(), 
+                        "stripcontext": MapCodes.stripcontext() 
+                    },
+                finalize=MapCodes.finalize_command()
+            )
+        print("--- Output commited into => {} collection".format(output))
+
+    def group_by_command_inline(self):
         """
         db.system.profile.mapReduce(
             function()
@@ -355,10 +386,16 @@ if __name__ == '__main__':
     parser.add_argument("--gen", help="Generate [GEN] entries", type=int)
     parser.add_argument("--agg", help="Aggregation", choices=CHOICES)
 
+    outputgroup = parser.add_mutually_exclusive_group()
+    outputgroup.add_argument("--inline", help="Inline the output (prints to" + 
+            "STDOUT)", action='store_true', default=True)
+    outputgroup.add_argument("--commit", help="Writes the output to a collection " 
+            + "(command aggregation only)", type=str)
+
 
     args = parser.parse_args()
 
-    db  = 'test'
+    db = 'test'
     url = 'mongodb://127.0.0.1:27017'
     collection ='system.profile'
 
@@ -410,5 +447,13 @@ if __name__ == '__main__':
         elif args.agg =="app":
             agg.group_by_app()
         else:
-            agg.group_by_command()
+            if args.commit:
+                if args.commit and len(args.commit) > 0:
+                    agg.group_by_command_commit(args.commit)
+                else:
+                    print("Received invalid commit collection name:" +
+                            "{}".format(args.commit))
+            else:
+                agg.group_by_command_inline()
+
         print("=========================================")
