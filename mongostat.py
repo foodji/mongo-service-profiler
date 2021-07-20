@@ -6,9 +6,6 @@
 ##########################
 
 
-# Adapted from: https://gist.github.com/sergray/1878413
-# https://docs.mongodb.com/manual/reference/connection-string/index.html#dns-seed-list-connection-format
-
 """
 Script for automated analysis of profiling data in MongoDB,
 gathered by Mongo with db.setProfilingLevel(1).
@@ -19,14 +16,10 @@ import string
 import random
 import datetime
 from   pprint    import pprint
-from   pymongo   import MongoClient as Connection, collection
+from   pymongo   import MongoClient as Connection, collection, ALL
 from   bson.code import Code
 # from   bson.son  import SON
 import argparse
-
-import pymongo
-from pymongo.common import validate
-from pymongo.database import Database
 
 DB_TEST_NAME='test'
 
@@ -153,7 +146,7 @@ class DBActor:
         self._idlist = self._db.post.distinct("_id", {})
 
     def setProfilingLevel(self):
-        self._db.set_profiling_level(level=pymongo.ALL)
+        self._db.set_profiling_level(level=ALL)
 
     def write(self):
         """
@@ -246,6 +239,7 @@ class Aggregator:
         """
         Constructor
         """
+        url += ("&" if "?" in url else "?") + "appname={}".format("Mongostat Aggregator")
         self._conn  = Connection(url)
         self._db    = self._conn[db]
         self._coll  = collection
@@ -305,10 +299,10 @@ class Aggregator:
         """
         data = self._db.get_collection(self._coll).aggregate([ 
             { '$group'   : { 
-                '_id'   : "$op", 
-                'apps'  : { '$addToSet' : "$appName" },
-                'total' : { '$sum'      :  1 }
-                } 
+                    '_id'   : "$op", 
+                    'apps'  : { '$addToSet' : "$appName" },
+                    'total' : { '$sum'      :  1 }
+                    } 
                 },
             ])
         pprint(list(data))
@@ -398,7 +392,7 @@ if __name__ == '__main__':
 
     if args.gen and args.gen > 0:
         print("=========================================")
-        print("Generating {} Entries into `{}` Database".format(args.gen, args.db))
+        print("Generating {} Entries into `{}` Database".format(args.gen, db))
         print("=========================================")
         CRUDRuntime(ticks=args.gen, url=url, table=db).run()
         print("=========================================")
