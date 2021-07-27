@@ -15,15 +15,15 @@ https://studio3t.com/knowledge-base/articles/mongodb-query-performance/
 import string
 import random
 import datetime
-from   pprint    import pprint
-from   pymongo   import MongoClient as Connection, aggregation, collection, ALL
-from   bson.code import Code
+from pprint import pprint
+from pymongo import MongoClient as Connection, ALL
+from bson.code import Code
 # from   bson.son  import SON
 import argparse
 
-DB_TEST_NAME='test'
+DB_TEST_NAME = 'test'
 
-CHOICES=["app", "op", "command"]
+CHOICES = ["app", "op", "command"]
 
 
 class MapCodes:
@@ -62,25 +62,37 @@ class MapCodes:
     def stripcontext():
         """
         Strip unnedded context in the command info
-        Converts some command specific context into constant values that will be
-        filtered out
+        Converts some command specific context into constant values that will
+        be filtered out
 
         NB: Only the filter key is targeted since thats where the 'query'
-        context lives. Other keys such as lsid ,limit, singleBatch or cursors arent 
-        targeted and may affect the output
+        context lives. Other keys such as lsid ,limit, singleBatch or cursors
+        arent targeted and may affect the output
         """
         return Code("""
             function(command)
             {
                 if(command["filter"])
                 {
-                    Object.keys(command["filter"]).map((key) => { 
+                    Object.keys(command["filter"]).map((key) => {
                         command["filter"][key] = true;
                     });
                 }
                 if(command["lsid"])
                 {
                     command["lsid"]["id"] = true;
+                }
+                if(command["count"] && command["query"])
+                {
+                    command["query"]["id"] = true;
+                }
+                if(command["q"])
+                {
+                    command["q"]["_id"] = true;
+                }
+                if(command["u"])
+                {
+                    command["u"]["$set"] = true;
                 }
             }
         """)
@@ -135,29 +147,43 @@ class MapCodes:
 
 
 class DBActor:
-    """A Database actor will perform a set of operations against a connection"""
+    """
+    A Database actor will perform a set of operations against a connection
+    """
 
     def __init__(self, name, url, table='test'):
         """
+        Start a DBActor
         """
         # url += ("&" if "?" in url else "/?") + "appname={}".format(name)
         # Pass appname parameter within connection constructor
-        self._conn  = Connection(url, appname=name)
-        self._db    = self._conn[table]
+        self._conn = Connection(url, appname=name)
+        self._db = self._conn[table]
         self._idlist = self._db.post.distinct("_id", {})
 
     def setProfilingLevel(self):
+        """
+        Set profiling level for events
+        """
         self._db.set_profiling_level(level=ALL)
+
+    def count(self):
+        """
+        Count operation
+        """
+        self._db.post.count_documents(filter={})
 
     def write(self):
         """
         Creates a post with random data
         """
         post = {
-                "author": ''.join(random.choices(string.ascii_letters + string.digits, k=26)),
-                "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
-                "tags"  : [ "mongodb", "python", "pymongo" ],
-                "date"  : datetime.datetime.utcnow()
+                "author": ''.join(
+                    random.choices(string.ascii_letters + string.digits, k=26)),
+                "text": ''.join(
+                    random.choices(string.ascii_letters + string.digits, k=54)),
+                "tags": ["mongodb", "python", "pymongo"],
+                "date": datetime.datetime.utcnow()
                 }
         uid = self._db.post.insert_one(post).inserted_id
         self._idlist.append(uid)
@@ -169,9 +195,12 @@ class DBActor:
         if len(self._idlist) > 0:
             upid = random.choice(self._idlist)
             post = {
-                    "text"  : ''.join(random.choices(string.ascii_letters + string.digits, k=54)),
-                    }
-            self._db.post.update_one({"_id" : upid}, { "$set": post })
+                    "text": ''.join(
+                        random.choices(
+                            string.ascii_letters + string.digits,
+                            k=54)),
+                        }
+            self._db.post.update_one({"_id": upid}, {"$set": post})
 
     def read(self):
         """
@@ -179,7 +208,7 @@ class DBActor:
         """
         if len(self._idlist) > 0:
             upid = random.choice(self._idlist)
-            self._db.post.find_one({ "id" : upid })
+            self._db.post.find_one({"id": upid})
 
     def delete(self):
         """
@@ -208,7 +237,7 @@ class CRUDRuntime:
         """
         RUn the simulation
         """
-        _actions = range(0,4)
+        _actions = range(0, 4)
         # Some parameters for profiling can be passed here
         self._hybridActor.setProfilingLevel()
         while self._counter < self._ticks:
@@ -221,8 +250,8 @@ class CRUDRuntime:
                 self._deleteActor.delete()
             else:
                 self._updateActor.update()
-            if random.randint(0,7) > random.randint(0,7):
-                self._hybridActor.read()
+            if random.randint(0, 7) > random.randint(0, 7):
+                self._hybridActor.count()
             elif _choice%2 == 0 :
                 self._hybridActor.write()
             self._counter = self._counter + 1
@@ -240,21 +269,22 @@ class Aggregator:
         """
         Constructor
         """
-        # url += ("&" if "?" in url else "?") + "appname={}".format("Mongostat Aggregator")
-        self._conn  = Connection(url, appname="Mongostat Aggregator")
-        self._db    = self._conn[db]
-        self._coll  = collection
+        # url += ("&" if "?" in url else "?") +
+        # "appname={}".format("Mongostat Aggregator")
+        self._conn = Connection(url, appname="Mongostat Aggregator")
+        self._db = self._conn[db]
+        self._coll = collection
         info = self._conn.server_info()
         dbi = self._db.profiling_level()
         print("-----------------------------------------")
-        print("| Mongo version: {} +git {}\n| Profiling level: {} ".format(info['version'],
+        print("| Mongo version: {} +git {}\n| Profiling level: {} ".format(
+            info['version'],
             info['gitVersion'], dbi))
         print("-----------------------------------------")
 
-
     def group_by_app(self):
         """
-        db.getCollection("system.profile").aggregate([ 
+        db.getCollection("system.profile").aggregate([
             { $group : {
                 _id   : { appName : '$appName', op  :'$op' },
                     total : {  $sum : 1 }
@@ -271,41 +301,47 @@ class Aggregator:
         ]);
         """
         data = self._db.get_collection(self._coll).aggregate([
-            { '$group' : {
-                '_id'   : { 'appName' : '$appName', 'op'  :'$op' },
-                'total' : {  '$sum' : 1 }
+            {
+                '$group': {
+                    '_id': {'appName': '$appName', 'op': '$op'},
+                    'total': {'$sum': 1}
                 }
             },
-            { '$project' : {
-                'appName' : '$_id.appName',
-                'op'      : '$_id.op',
-                'total'   : '$total' ,
-                '_id'     : 0
-                }
+            {
+                '$project': {
+                    'appName': '$_id.appName',
+                    'op': '$_id.op',
+                    'total': '$total',
+                    '_id': 0
+                    }
                 },
-            { '$sort' : { "appName" : 1 } }
+            {'$sort': {"appName": 1}}
             ])
         pprint(list(data))
 
     def group_by_op(self):
         """
-        db.getCollection("system.profile").aggregate([ 
-            { $group   : { 
-                _id : "$op", 
-                apps: { $addToSet : "$appName" }, 
+        db.getCollection("system.profile").aggregate([
+            { $group   : {
+                _id : "$op",
+                apps: { $addToSet : "$appName" },
                 total: { $sum : 1 }
-                } 
+                }
             },
         ])
         """
-        data = self._db.get_collection(self._coll).aggregate([ 
-            { '$group'   : { 
-                    '_id'   : "$op", 
-                    'apps'  : { '$addToSet' : "$appName" },
-                    'total' : { '$sum'      :  1 }
-                    } 
-                },
-            ])
+        data = self._db.get_collection(self._coll).aggregate([
+            {
+                '$group':
+                {
+                    '_id': "$op",
+                    'apps': {
+                        '$addToSet': "$appName"
+                    },
+                    'total': {'$sum':  1}
+                }
+            },
+        ])
         pprint(list(data))
 
     def group_by_command_commit(self, output):
@@ -315,25 +351,25 @@ class Aggregator:
             {
                 emit( this.appName, this.command  );
             },
-            function( key, values ) 
+            function( key, values )
             {
                 return values;
             },
             {
                 query: {},
-                out  :  <collection name>, 
+                out  :  <collection name>,
                 finalize: ...
             },
         )
         """
         self._db.get_collection(self._coll).map_reduce(
-                map     = MapCodes.map_command(),
-                reduce  = MapCodes.reduce_command(),
-                out     = output,
-                scope   = {
-                        "scrubber" : MapCodes.scrubber(), 
-                        "stripcontext": MapCodes.stripcontext() 
-                    },
+                map=MapCodes.map_command(),
+                reduce=MapCodes.reduce_command(),
+                out=output,
+                scope={
+                    "scrubber": MapCodes.scrubber(),
+                    "stripcontext": MapCodes.stripcontext()
+                },
                 finalize=MapCodes.finalize_command()
             )
         print("--- Output commited into => {} collection".format(output))
@@ -345,7 +381,7 @@ class Aggregator:
             {
                 emit( this.appName, this.command  );
             },
-            function( key, values ) 
+            function( key, values )
             {
                 return values;
             },
@@ -359,51 +395,53 @@ class Aggregator:
         # TODO: Pass CLI option to select the collection name
         # TODO: Optionally select whether to run inline or writeback
         data = self._db.get_collection(self._coll).inline_map_reduce(
-        # data = self._db.get_collection("system.profile").map_reduce(
-        # data = self._db.get_collection("system_profile").map_reduce(
-                map     = MapCodes.map_command(),
-                reduce  = MapCodes.reduce_command(),
-                # out     = "mongostat",  ## TODO: Make optional not hardcoded
-                # out=SON([('inline', 1)]),
-                scope   = {
-                        "scrubber" : MapCodes.scrubber(), 
-                        "stripcontext": MapCodes.stripcontext() 
+                    map=MapCodes.map_command(),
+                    reduce=MapCodes.reduce_command(),
+                    scope={
+                        "scrubber": MapCodes.scrubber(),
+                        "stripcontext": MapCodes.stripcontext()
                     },
-                finalize=MapCodes.finalize_command()
+                    finalize=MapCodes.finalize_command()
                 )
         pprint(data)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Mongostat - Collect MongoDB statistics')
-    # TODO: Add config parameter to configure some arguments in a better way
-    group   = parser.add_mutually_exclusive_group()
-    group.add_argument("--config", help="Use Config file - JSON file containing url, db and collection")
-    group.add_argument("--connect", help="Connection pair in `url db collection` format (with space) ", type=str)
 
-    # parser.add_argument("--db",  help="Database name", default="test", type=str)
-    # parser.add_argument("--url", help="Database url", default="mongodb://127.0.0.1:27017", type=str)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+            description='Mongostat - Collect MongoDB statistics')
+    # TODO: Add config parameter to configure some arguments in a better way
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+            "--config",
+            help="Use Config JSON file containing url, db and collection")
+    group.add_argument(
+            "--connect",
+            help="Connection pair in `url db collection` format (with space)",
+            type=str)
 
     parser.add_argument("--gen", help="Generate [GEN] entries", type=int)
     parser.add_argument("--agg", help="Aggregation", choices=CHOICES)
 
     outputgroup = parser.add_mutually_exclusive_group()
-    outputgroup.add_argument("--inline", help="Inline the output (prints to" + 
-            "STDOUT)", action='store_true', default=True)
-    outputgroup.add_argument("--commit", help="Writes the output to a collection " 
-            + "(command aggregation only)", type=str)
-
+    outputgroup.add_argument("--inline",
+                             help="Inline the output (prints to STDOUT)",
+                             action='store_true',
+                             default=True)
+    outputgroup.add_argument("--commit",
+                             help="Writes the output to a collection " +
+                             "(command aggregation only)", type=str)
 
     args = parser.parse_args()
 
     db = 'test'
     url = 'mongodb://127.0.0.1:27017'
-    collection ='system.profile'
+    collection = 'system.profile'
 
     if args.config:
         import json
         with open(args.config) as fconf:
             jsonconf = json.load(fconf)
-            db  = jsonconf["db"]
+            db = jsonconf["db"]
             url = jsonconf["url"]
             collection = jsonconf["collection"]
     else:
@@ -411,7 +449,7 @@ if __name__ == '__main__':
             connstr = args.connect.split(" ")
             if len(connstr) == 3:
                 url = connstr[0]
-                db  = connstr[1]
+                db = connstr[1]
                 collection = connstr[2]
             else:
                 print("URL should be space separated string e.g \"{} {} {}\"".format(url, db, collection))
@@ -426,7 +464,6 @@ if __name__ == '__main__':
     print("## Profile collection : {} ".format(collection))
     print("=========================================")
 
-
     if args.gen and args.gen > 0:
         print("=========================================")
         print("Generating {} Entries into `{}` Database".format(args.gen, db))
@@ -435,7 +472,8 @@ if __name__ == '__main__':
         print("=========================================")
     else:
         if args.gen:
-            print("Expected positive number of entries for Test Data generation")
+            print("Expected positive number of entries" +
+                  "for Test Data generation")
 
     if args.agg:
         agg = Aggregator(url=url, db=db, collection=collection)
@@ -444,7 +482,7 @@ if __name__ == '__main__':
         print("=========================================")
         if args.agg == "op":
             agg.group_by_op()
-        elif args.agg =="app":
+        elif args.agg == "app":
             agg.group_by_app()
         else:
             if args.commit:
@@ -452,7 +490,7 @@ if __name__ == '__main__':
                     agg.group_by_command_commit(args.commit)
                 else:
                     print("Received invalid commit collection name:" +
-                            "{}".format(args.commit))
+                          "{}".format(args.commit))
             else:
                 agg.group_by_command_inline()
 
