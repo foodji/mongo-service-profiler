@@ -60,6 +60,7 @@ class MapCodes:
 
     @staticmethod
     def stripcontext():
+        # TODO: implement a 'filter' scheme for this
         """
         Strip unnedded context in the command info
         Converts some command specific context into constant values that will
@@ -72,28 +73,23 @@ class MapCodes:
         return Code("""
             function(command)
             {
-                if(command["filter"])
-                {
-                    Object.keys(command["filter"]).map((key) => {
-                        command["filter"][key] = true;
-                    });
-                }
-                if(command["lsid"])
-                {
-                    command["lsid"]["id"] = true;
-                }
-                if(command["count"] && command["query"])
-                {
-                    command["query"]["id"] = true;
-                }
-                if(command["q"])
-                {
-                    command["q"]["_id"] = true;
-                }
-                if(command["u"])
-                {
-                    command["u"]["$set"] = true;
-                }
+                [
+                  { k: "filter", c: function(v){return true;}},
+                  { k: "lsid", c: (v) => {return ["id"].some((i) => v==i)}},
+                  { k: "query", c: (v) => {return ["id"].some((i) => v==i)}},
+                  { k: "q", c: (v) => {return ["_id"].some((i) => v==i)}},
+                  { k: "u", c: (v) => {return ["$set"].some((i) => v==i)}},
+                ].reduce(function(acc, curr){
+                    if(acc[curr.k])
+                    {
+                        // if the accumulator has the key k, filter by
+                        // c, then map filtered entries to True
+                        Object.keys(acc[curr.k]).filter(curr.c).map((k) => {
+                            acc[curr.k][k] = true;
+                        });
+                    }
+                    return acc;
+                }, command);
             }
         """)
 
@@ -120,11 +116,12 @@ class MapCodes:
         """
         # return Code("function(key, values){ return JSON.stringify(values) }")
         return Code("""
+            // Some older versions of mongo require a values key in the object
             function(k,v){
-                let itemset = new Set();
-                v.forEach(function(val){
-                    itemset.add(JSON.stringify(val));
-                });
+                let itemset = v.reduce((acc, curr) => {
+                    acc.add(JSON.stringify(curr));
+                    return acc;
+                }, new Set())
                 return {values: Array.from(itemset)};
             }
         """)
@@ -138,11 +135,11 @@ class MapCodes:
         return Code("""
             function(key,red)
             {
-                let itemset = new Set();
-                red.values.forEach(function(val){
-                    itemset.add(JSON.parse(val));
-                })
-                return Array.from(itemset);
+                let itemdata = red.values.reduce((acc, curr) => {
+                    acc.push(JSON.parse(curr));
+                    return acc;
+                }, []);
+                return itemdata;
             }""")
 
 
@@ -199,7 +196,7 @@ class DBActor:
                         random.choices(
                             string.ascii_letters + string.digits,
                             k=54)),
-                        }
+                    }
             self._db.post.update_one({"_id": upid}, {"$set": post})
 
     def read(self):
@@ -216,7 +213,7 @@ class DBActor:
         """
         if len(self._idlist) > 0:
             upid = random.choice(self._idlist)
-            self._db.post.delete_one({ "_id" : upid })
+            self._db.post.delete_one({"_id": upid})
             self._idlist.remove(upid)
 
 
@@ -456,7 +453,6 @@ if __name__ == '__main__':
                 print("Using default connection parameters")
         else:
             print("Using default connection parameters")
-
 
     print("=========================================")
     print("## URL                : {} ".format(url))
