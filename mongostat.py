@@ -69,23 +69,34 @@ class MapCodes:
         NB: Only the filter key is targeted since thats where the 'query'
         context lives. Other keys such as lsid ,limit, singleBatch or cursors
         arent targeted and may affect the output
+
+        TODO: The vocabulary of values mapped to true is a large one and needs
+        to be expanded , perhaps recursively
+        TODO: Better handle 'r' closure for bucketId
+              query -> bucketId -> $in : [ .. ids]
         """
         return Code("""
             function(command)
             {
                 [
-                  { k: "filter", c: function(v){return true;}},
-                  { k: "lsid", c: (v) => {return ["id"].some((i) => v==i)}},
-                  { k: "query", c: (v) => {return ["id"].some((i) => v==i)}},
-                  { k: "q", c: (v) => {return ["_id"].some((i) => v==i)}},
-                  { k: "u", c: (v) => {return ["$set"].some((i) => v==i)}},
+                  { k: "filter", c: (v) => true, r: (v) => true},
+                  { k: "lsid", c: (v) => ["id"].some((i) => v==i), r: (v) => true},
+                  { k: "query", c: (v) => ["id"].some((i) => v==i), r: (v) => true },
+                  { k: "query", c: (v) => ["bucketSetId"].some((i) => v==i), r: (v) => true},
+                  { k: "query", c: (v) => ["bucketId"].some((i) => v==i),
+                    r: (v) =>  Object.keys(v).map((i) => {
+                        let o = {};
+                        o[i] = true;
+                        return o })},
+                  { k: "q", c: (v) => ["_id"].some((i) => v==i), r: (v) => true},
+                  { k: "u", c: (v) => ["$set"].some((i) => v==i), r: (v) => true},
                 ].reduce(function(acc, curr){
                     if(acc[curr.k])
                     {
                         // if the accumulator has the key k, filter by
                         // c, then map filtered entries to True
                         Object.keys(acc[curr.k]).filter(curr.c).map((k) => {
-                            acc[curr.k][k] = true;
+                            acc[curr.k][k] = curr.r(acc[curr.k][k]);
                         });
                     }
                     return acc;
@@ -97,6 +108,8 @@ class MapCodes:
     def map_command():
         """
         Map stage of the MapReduce, does some scrubbing and stripping
+        TODO: At this stage, compute the statistics and pass them as value in
+              the final output object.
         """
         return Code("""
             function(){
@@ -113,16 +126,32 @@ class MapCodes:
         """
         Reduce stage of the MapReduce. Stringifies the value into a Set, to
         retain unique entries
+
+        NB: On the totaling approach used (hashtable)
+        A better way would be to sort the incoming values and compare the
+        neighbouring values - but that is compute heavy
+        This is simpler but requires more memory
         """
         # return Code("function(key, values){ return JSON.stringify(values) }")
+        # TODO: Decouple totaling function and abstract to other possible ways
         return Code("""
             // Some older versions of mongo require a values key in the object
+            // Use a hashtable to store sums,
             function(k,v){
                 let itemset = v.reduce((acc, curr) => {
-                    acc.add(JSON.stringify(curr));
+                    let jsonstr = JSON.stringify(curr);
+                    if(acc.hashtable[jsonstr] !== undefined) {
+                        acc.hashtable[jsonstr] = acc.hashtable[jsonstr] + 1;
+                    } else {
+                        acc.hashtable[jsonstr] = 1;
+                    }
+                    acc.items.add(jsonstr);
                     return acc;
-                }, new Set())
-                return {values: Array.from(itemset)};
+                }, { items: new Set(), hashtable: {} })
+                return {
+                    values: Array.from(itemset.items),
+                    totals: itemset.hashtable
+                };
             }
         """)
 
@@ -130,15 +159,18 @@ class MapCodes:
     def finalize_command():
         """
         Finalize stage after the mapreduce to reconvert back the stringified
-        objects
+        objects and embedding the computed function i.e total for this case
         """
         return Code("""
-            function(key,red)
+            function(key, val)
             {
-                let itemdata = red.values.reduce((acc, curr) => {
-                    acc.push(JSON.parse(curr));
+                let itemdata = val.values.reduce((acc, curr) => {
+                    let jsondata = JSON.parse(curr);
+                    jsondata["census"] = val.totals[curr]
+                    acc.push(jsondata);
                     return acc;
                 }, []);
+                itemdata.sort((v,b) => v.count > b.count);
                 return itemdata;
             }""")
 
