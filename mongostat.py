@@ -83,12 +83,13 @@ class MapCodes:
                   { k: "lsid", c: (v) => ["id"].some((i) => v==i), r: (v) => true},
                   { k: "query", c: (v) => ["id"].some((i) => v==i), r: (v) => true },
                   { k: "query", c: (v) => ["bucketSetId"].some((i) => v==i), r: (v) => true},
+                  { k: "query", c: (v) => ["accountId"].some((i) => v==i), r: (v) => true},
                   { k: "query", c: (v) => ["bucketId"].some((i) => v==i),
                     r: (v) =>  Object.keys(v).map((i) => {
-                        let o = {};
-                        o[i] = true;
-                        return o })},
+                        let o = {}; o[i] = true; return o;
+                    })},
                   { k: "q", c: (v) => ["_id"].some((i) => v==i), r: (v) => true},
+                  { k: "q", c: (v) => ["id"].some((i) => v==i), r: (v) => true},
                   { k: "u", c: (v) => ["$set"].some((i) => v==i), r: (v) => true},
                 ].reduce(function(acc, curr){
                     if(acc[curr.k])
