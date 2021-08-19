@@ -171,7 +171,7 @@ class MapCodes:
                     acc.push(jsondata);
                     return acc;
                 }, []);
-                itemdata.sort((v,b) => v.census > b.census);
+                itemdata.sort((v,b) => v.census < b.census);
                 return itemdata;
             }""")
 
