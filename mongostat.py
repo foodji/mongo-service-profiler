@@ -32,80 +32,6 @@ class MapCodes:
     # may need to load Code data based on mongo version information
 
     @staticmethod
-    def scrubber():
-        """
-        Global variables and functions
-        This method converts some specific problematic BSON objects into plain
-        strings so that the JSON.stringify and JSON.parse work as intended. It
-        should probably be broken up to be more granular
-        """
-        return Code("""
-                function(obj, astage, bstage, tov)
-                {
-                    if(obj[astage] !== undefined)
-                    {
-                        if(obj[astage][bstage] !== undefined)
-                        {
-                            if(tov)
-                            {
-                               obj[astage][bstage] = obj[astage][bstage].valueOf();
-                            } else
-                            {
-                               obj[astage][bstage] = obj[astage][bstage].valueOf().toString().split('"')[1];
-                            }
-                        }
-                    }
-                }
-        """)
-
-    @staticmethod
-    def stripcontext():
-        # TODO: implement a 'filter' scheme for this
-        """
-        Strip unnedded context in the command info
-        Converts some command specific context into constant values that will
-        be filtered out
-
-        NB: Only the filter key is targeted since thats where the 'query'
-        context lives. Other keys such as lsid ,limit, singleBatch or cursors
-        arent targeted and may affect the output
-
-        TODO: The vocabulary of values mapped to true is a large one and needs
-        to be expanded , perhaps recursively
-        TODO: Better handle 'r' closure for bucketId
-              query -> bucketId -> $in : [ .. ids]
-        """
-        return Code("""
-            function(command)
-            {
-                [
-                  { k: "filter", c: (v) => true, r: (v) => true},
-                  { k: "lsid", c: (v) => ["id"].some((i) => v==i), r: (v) => true},
-                  { k: "query", c: (v) => ["id"].some((i) => v==i), r: (v) => true },
-                  { k: "query", c: (v) => ["bucketSetId"].some((i) => v==i), r: (v) => true},
-                  { k: "query", c: (v) => ["accountId"].some((i) => v==i), r: (v) => true},
-                  { k: "query", c: (v) => ["bucketId"].some((i) => v==i),
-                    r: (v) =>  Object.keys(v).map((i) => {
-                        let o = {}; o[i] = true; return o;
-                    })},
-                  { k: "q", c: (v) => ["_id"].some((i) => v==i), r: (v) => true},
-                  { k: "q", c: (v) => ["id"].some((i) => v==i), r: (v) => true},
-                  { k: "u", c: (v) => ["$set"].some((i) => v==i), r: (v) => true},
-                ].reduce(function(acc, curr){
-                    if(acc[curr.k])
-                    {
-                        // if the accumulator has the key k, filter by
-                        // c, then map filtered entries to True
-                        Object.keys(acc[curr.k]).filter(curr.c).map((k) => {
-                            acc[curr.k][k] = curr.r(acc[curr.k][k]);
-                        });
-                    }
-                    return acc;
-                }, command);
-            }
-        """)
-
-    @staticmethod
     def map_command():
         """
         Map stage of the MapReduce, does some scrubbing and stripping
@@ -115,10 +41,7 @@ class MapCodes:
         return Code("""
             function(){
                 let commcopy = Object.assign({}, this.command);
-                scrubber(commcopy, "q", "_id", true);
-                scrubber(commcopy, "filter", "id", true);
-                scrubber(commcopy, "lsid", "id", false);
-                stripcontext(commcopy);
+                decontextualize(commcopy);
                 emit( this.appName, commcopy  );
             }""")
 
@@ -174,6 +97,44 @@ class MapCodes:
                 itemdata.sort((v,b) => v.census < b.census);
                 return itemdata;
             }""")
+
+    @staticmethod
+    def decontextualizer():
+        """
+        Takes in an object and recursively mutates leaf nodes to true
+        eliminating contextual information
+            Base case  : (number, string) => True,
+            Array case : ([ ... ]) => [True],
+            Object case: ({ ... } = i) => recursively decontextualize(i)
+        """
+        return Code("""
+            function(o){
+                // PS: Function has to be named decontextualize for the
+                // recursion to work
+                // For all keys
+                if (o != null)
+                {
+                    Object.keys(o).map(
+                        (e) => {
+                            // Arrays are seen as objects in JS!
+                            // So just check 1st for arrays
+                            if(!Array.isArray(o[e])){
+                                if (!(typeof(o[e]) == "object")) {
+                                    // Base case
+                                    o[e] = true
+                                } else {
+                                    // Recursive case
+                                    decontextualize(o[e])
+                                }
+                            } else {
+                                // Array case
+                                o[e] = [true]
+                            }
+                        }
+                    );
+                }
+            }
+        """)
 
 
 class DBActor:
@@ -397,8 +358,7 @@ class Aggregator:
                 reduce=MapCodes.reduce_command(),
                 out=output,
                 scope={
-                    "scrubber": MapCodes.scrubber(),
-                    "stripcontext": MapCodes.stripcontext()
+                    "decontextualize": MapCodes.decontextualizer()
                 },
                 finalize=MapCodes.finalize_command()
             )
@@ -428,13 +388,20 @@ class Aggregator:
                     map=MapCodes.map_command(),
                     reduce=MapCodes.reduce_command(),
                     scope={
-                        "scrubber": MapCodes.scrubber(),
-                        "stripcontext": MapCodes.stripcontext()
+                        "decontextualize": MapCodes.decontextualizer()
                     },
                     finalize=MapCodes.finalize_command()
                 )
         pprint(data)
 
+
+class Presenter():
+
+    """TODO: Use tabulate to format output"""
+
+    def __init__(self):
+        """TODO: to be defined. """
+        pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
