@@ -43,6 +43,7 @@ class MapCodes:
                 let commcopy = Object.assign({}, this.command);
                 decontextualize(commcopy);
                 emit( this.appName, commcopy  );
+                return commcopy;
             }""")
 
     @staticmethod
@@ -72,10 +73,18 @@ class MapCodes:
                     acc.items.add(jsonstr);
                     return acc;
                 }, { items: new Set(), hashtable: {} })
-                return {
-                    values: Array.from(itemset.items),
-                    totals: itemset.hashtable
-                };
+                let itemdata = Array.from(itemset.items).reduce((acc, curr) =>
+                {
+                    let jsondata = JSON.parse(curr);
+                    jsondata["census"] = itemset.hashtable[curr]
+                    acc.push(jsondata);
+                    return acc;
+                }, []);
+                return { value: itemdata };
+                // {
+                //    value: Array.from(itemset.items),
+                //    total: itemset.hashtable
+                // };
             }
         """)
 
@@ -88,14 +97,14 @@ class MapCodes:
         return Code("""
             function(key, val)
             {
-                let itemdata = val.values.reduce((acc, curr) => {
-                    let jsondata = JSON.parse(curr);
-                    jsondata["census"] = val.totals[curr]
-                    acc.push(jsondata);
-                    return acc;
-                }, []);
-                itemdata.sort((v,b) => v.census < b.census);
-                return itemdata;
+                // let itemdata = val.value.reduce((acc, curr) => {
+                //     let jsondata = JSON.parse(curr);
+                //     jsondata["census"] = val.total[curr]
+                //     acc.push(jsondata);
+                //     return acc;
+                // }, []);
+                val.value.sort((v,b) => v.census < b.census);
+                return val.value;
             }""")
 
     @staticmethod
@@ -170,9 +179,9 @@ class DBActor:
         """
         post = {
                 "author": ''.join(
-                    random.choices(string.ascii_letters + string.digits, k=26)),
+                  random.choices(string.ascii_letters + string.digits, k=26)),
                 "text": ''.join(
-                    random.choices(string.ascii_letters + string.digits, k=54)),
+                  random.choices(string.ascii_letters + string.digits, k=54)),
                 "tags": ["mongodb", "python", "pymongo"],
                 "date": datetime.datetime.utcnow()
                 }
@@ -209,6 +218,14 @@ class DBActor:
             upid = random.choice(self._idlist)
             self._db.post.delete_one({"_id": upid})
             self._idlist.remove(upid)
+
+class Presenter():
+
+    """TODO: Summarize data and tabulate it"""
+
+    def __init__(self):
+        """Constructor """
+        pass
 
 
 class CRUDRuntime:
